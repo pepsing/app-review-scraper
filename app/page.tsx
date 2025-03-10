@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { AppStatsCard } from "@/components/app-stats-card"
 import { RecentReviewsList } from "@/components/recent-reviews-list"
-import { getApps, getRecentReviews, getStats } from "@/lib/data-service"
+import { getApps, getRecentReviews, getStats, initDatabase } from "@/lib/data-service"
 
 export default async function Dashboard() {
+  // 初始化数据库
+  await initDatabase()
+  
   const apps = await getApps()
   const stats = await getStats()
   const recentReviews = await getRecentReviews()

@@ -1,5 +1,6 @@
+import { Metadata } from 'next'
 import Link from "next/link"
-import { ArrowLeft, Download } from "lucide-react"
+import { ArrowLeft, Download, Pencil } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,8 +12,21 @@ import { getAppById, getAppReviews, getAppRatingHistory, getAppRegionDistributio
 import { DeleteAppButton } from "@/components/delete-app-button"
 import { ScrapeNowButton } from "@/components/scrape-now-button"
 
-export default async function AppDetailsPage({ params }: { params: { id: string } }) {
-  const app = await getAppById(params.id)
+type Props = {
+  params: Promise<{ id: string }>
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const resolvedParams = await params
+  const app = await getAppById(resolvedParams.id)
+  return {
+    title: app ? `${app.name} - Details` : 'App Not Found',
+  }
+}
+
+export default async function AppDetailsPage({ params }: Props) {
+  const resolvedParams = await params
+  const app = await getAppById(resolvedParams.id)
 
   if (!app) {
     return (
@@ -30,9 +44,18 @@ export default async function AppDetailsPage({ params }: { params: { id: string 
     )
   }
 
-  const reviews = await getAppReviews(params.id)
-  const ratingHistory = await getAppRatingHistory(params.id)
-  const regionDistribution = await getAppRegionDistribution(params.id)
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toISOString().split('T')[0];
+  };
+
+  const formattedDate = formatDate(app.lastUpdated);
+
+  const [reviews, ratingHistory, regionDistribution] = await Promise.all([
+    getAppReviews(resolvedParams.id),
+    getAppRatingHistory(resolvedParams.id),
+    getAppRegionDistribution(resolvedParams.id)
+  ]);
 
   const appStoreReviews = reviews.filter((review) => review.store === "app-store")
   const playStoreReviews = reviews.filter((review) => review.store === "play-store")
@@ -63,11 +86,17 @@ export default async function AppDetailsPage({ params }: { params: { id: string 
           />
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{app.name}</h1>
-            <p className="text-muted-foreground">Last updated: {new Date(app.lastUpdated).toLocaleString()}</p>
+            <p className="text-muted-foreground">Last updated: {formattedDate}</p>
           </div>
         </div>
         <div className="ml-auto flex gap-2">
           <ScrapeNowButton appId={app.id} />
+          <Button variant="outline" asChild>
+            <Link href={`/apps/${app.id}/edit`}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <Link href={`/api/export/${app.id}`}>
               <Download className="mr-2 h-4 w-4" />

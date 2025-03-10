@@ -21,60 +21,42 @@ export async function createApp(appData: Omit<App, "id" | "rating" | "reviewCoun
   return newApp
 }
 
-// 删除应用
-export async function deleteApp(appId: string) {
-  await db.deleteApp(appId)
-
+// 更新应用
+export async function updateApp(app: App) {
+  await db.updateApp(app)
   revalidatePath("/")
-  return { success: true }
+  revalidatePath(`/apps/${app.id}`)
+  return app
+}
+
+// 删除应用
+export async function deleteApp(id: string) {
+  await db.deleteApp(id)
+  revalidatePath("/")
 }
 
 // 抓取应用评论
 export async function scrapeAppReviews(appId: string) {
   const app = await db.getAppById(appId)
+  if (!app) return
 
-  if (!app) {
-    throw new Error("App not found")
-  }
+  const reviews: Review[] = []
 
-  const newReviews: Review[] = []
-
-  // 抓取 App Store 评论
   if (app.appStoreId) {
-    for (const region of app.appStoreRegions) {
-      const appStoreReviews = await scrapeAppStoreReviews(app.appStoreId, region)
-
-      // 转换为我们的 Review 格式并添加应用详情
-      const formattedReviews = appStoreReviews.map((review) => ({
-        ...review,
-        appId,
-        appName: app.name,
-      }))
-
-      newReviews.push(...formattedReviews)
-    }
+    const appStoreReviews = await scrapeAppStoreReviews(app.appStoreId, app.appStoreRegions)
+    reviews.push(...appStoreReviews)
   }
 
-  // 抓取 Play Store 评论
   if (app.playStoreId) {
-    for (const region of app.playStoreRegions) {
-      const playStoreReviews = await scrapePlayStoreReviews(app.playStoreId, region)
-
-      // 转换为我们的 Review 格式并添加应用详情
-      const formattedReviews = playStoreReviews.map((review) => ({
-        ...review,
-        appId,
-        appName: app.name,
-      }))
-
-      newReviews.push(...formattedReviews)
-    }
+    const playStoreReviews = await scrapePlayStoreReviews(app.playStoreId, app.playStoreRegions)
+    reviews.push(...playStoreReviews)
   }
 
-  // 保存新评论
-  await db.addReviews(appId, newReviews)
+  if (reviews.length > 0) {
+    await db.addReviews(appId, reviews)
+  }
 
   revalidatePath(`/apps/${appId}`)
-  return { success: true, reviewsCount: newReviews.length }
+  return reviews
 }
 

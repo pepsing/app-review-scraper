@@ -1,4 +1,5 @@
 import type { App, Review, Stats, RatingHistory, RegionData } from "./types"
+import { Redis } from '@upstash/redis'
 
 // 内存存储（用于开发环境）
 const memoryApps: Record<string, App> = {}
@@ -11,26 +12,46 @@ const canUseRedis =
   typeof process.env.UPSTASH_REDIS_REST_URL === "string" && typeof process.env.UPSTASH_REDIS_REST_TOKEN === "string"
 
 // 有条件地导入 Upstash Redis
-let redis: any = undefined
+let redis: Redis | undefined = undefined
 if (canUseRedis) {
-  // 动态导入 Upstash Redis 以避免在没有环境变量时出错
-  import("@upstash/redis")
-    .then((module) => {
-      redis = new module.Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN,
-      })
+  try {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
     })
-    .catch((err) => {
-      console.error("Failed to import @upstash/redis:", err)
-    })
+  } catch (err) {
+    console.error("Failed to initialize Redis:", err)
+  }
 }
 
 // 应用相关操作
 export async function getApps(): Promise<App[]> {
   if (canUseRedis && redis) {
-    const apps = (await redis.hgetall("apps")) as Record<string, string>
-    return Object.values(apps || {}).map((appStr) => JSON.parse(appStr))
+    try {
+      const apps = (await redis.hgetall("apps")) as Record<string, any>
+      console.log('Raw apps from Redis:', apps);
+      if (!apps) return [];
+      return Object.values(apps).map((appData) => {
+        try {
+          // 检查 appData 是否已经是对象
+          if (typeof appData === 'object' && appData !== null) {
+            return appData;
+          }
+          // 如果是字符串，尝试解析
+          if (typeof appData === 'string') {
+            return JSON.parse(appData);
+          }
+          console.error('Invalid app data format:', appData);
+          return null;
+        } catch (e) {
+          console.error('Failed to parse app data:', appData, e);
+          return null;
+        }
+      }).filter(Boolean);
+    } catch (e) {
+      console.error('Failed to get apps from Redis:', e);
+      return [];
+    }
   } else {
     return Object.values(memoryApps)
   }
@@ -38,8 +59,24 @@ export async function getApps(): Promise<App[]> {
 
 export async function getAppById(id: string): Promise<App | null> {
   if (canUseRedis && redis) {
-    const appStr = (await redis.hget("apps", id)) as string | null
-    return appStr ? JSON.parse(appStr) : null
+    try {
+      const appData = (await redis.hget("apps", id)) as any;
+      if (!appData) return null;
+      
+      // 检查是否已经是对象
+      if (typeof appData === 'object' && appData !== null) {
+        return appData;
+      }
+      // 如果是字符串，尝试解析
+      if (typeof appData === 'string') {
+        return JSON.parse(appData);
+      }
+      console.error('Invalid app data format:', appData);
+      return null;
+    } catch (e) {
+      console.error('Failed to get app from Redis:', e);
+      return null;
+    }
   } else {
     return memoryApps[id] || null
   }
@@ -78,8 +115,29 @@ export async function deleteApp(id: string): Promise<void> {
 // 评论相关操作
 export async function getReviews(appId: string): Promise<Review[]> {
   if (canUseRedis && redis) {
-    const reviewStrings = (await redis.lrange(`reviews:${appId}`, 0, -1)) as string[]
-    return reviewStrings.map((str) => JSON.parse(str))
+    try {
+      const reviewData = (await redis.lrange(`reviews:${appId}`, 0, -1)) as any[]
+      return reviewData.map((data) => {
+        try {
+          // 检查是否已经是对象
+          if (typeof data === 'object' && data !== null) {
+            return data;
+          }
+          // 如果是字符串，尝试解析
+          if (typeof data === 'string') {
+            return JSON.parse(data);
+          }
+          console.error('Invalid review data format:', data);
+          return null;
+        } catch (e) {
+          console.error('Failed to parse review data:', data, e);
+          return null;
+        }
+      }).filter(Boolean);
+    } catch (e) {
+      console.error('Failed to get reviews from Redis:', e);
+      return [];
+    }
   } else {
     return memoryReviews[appId] || []
   }
@@ -118,20 +176,64 @@ export async function getRecentReviews(limit = 10): Promise<Review[]> {
 // 评分历史
 export async function getRatingHistory(appId: string): Promise<RatingHistory[]> {
   if (canUseRedis && redis) {
-    const historyStr = (await redis.get(`rating_history:${appId}`)) as string | null
-    return historyStr ? JSON.parse(historyStr) : generateMockRatingHistory()
+    try {
+      const historyData = await redis.get(`rating_history:${appId}`);
+      
+      // 检查是否已经是对象
+      if (typeof historyData === 'object' && historyData !== null) {
+        return Array.isArray(historyData) ? historyData : generateMockRatingHistory();
+      }
+      
+      // 如果是字符串，尝试解析
+      if (typeof historyData === 'string') {
+        try {
+          const parsed = JSON.parse(historyData);
+          return Array.isArray(parsed) ? parsed : generateMockRatingHistory();
+        } catch (e) {
+          console.error('Failed to parse rating history:', e);
+          return generateMockRatingHistory();
+        }
+      }
+      
+      return generateMockRatingHistory();
+    } catch (e) {
+      console.error('Failed to get rating history from Redis:', e);
+      return generateMockRatingHistory();
+    }
   } else {
-    return memoryRatingHistory[appId] || generateMockRatingHistory()
+    return memoryRatingHistory[appId] || generateMockRatingHistory();
   }
 }
 
 // 区域分布
 export async function getRegionDistribution(appId: string): Promise<RegionData[]> {
   if (canUseRedis && redis) {
-    const distributionStr = (await redis.get(`region_distribution:${appId}`)) as string | null
-    return distributionStr ? JSON.parse(distributionStr) : generateMockRegionDistribution()
+    try {
+      const distributionData = await redis.get(`region_distribution:${appId}`);
+      
+      // 检查是否已经是对象
+      if (typeof distributionData === 'object' && distributionData !== null) {
+        return Array.isArray(distributionData) ? distributionData : generateMockRegionDistribution();
+      }
+      
+      // 如果是字符串，尝试解析
+      if (typeof distributionData === 'string') {
+        try {
+          const parsed = JSON.parse(distributionData);
+          return Array.isArray(parsed) ? parsed : generateMockRegionDistribution();
+        } catch (e) {
+          console.error('Failed to parse region distribution:', e);
+          return generateMockRegionDistribution();
+        }
+      }
+      
+      return generateMockRegionDistribution();
+    } catch (e) {
+      console.error('Failed to get region distribution from Redis:', e);
+      return generateMockRegionDistribution();
+    }
   } else {
-    return memoryRegionDistribution[appId] || generateMockRegionDistribution()
+    return memoryRegionDistribution[appId] || generateMockRegionDistribution();
   }
 }
 
@@ -262,190 +364,68 @@ async function updateRegionDistribution(appId: string, reviews: Review[]): Promi
 
 // 生成模拟评分历史数据
 function generateMockRatingHistory(): RatingHistory[] {
-  const today = new Date()
-  const data: RatingHistory[] = []
+  const baseDate = new Date('2024-01-01T00:00:00.000Z');
+  const data: RatingHistory[] = [];
 
   for (let i = 6; i >= 0; i--) {
-    const date = new Date()
-    date.setMonth(today.getMonth() - i)
+    const date = new Date(baseDate);
+    date.setMonth(baseDate.getMonth() - i);
 
     data.push({
       date: date.toISOString(),
-      appStore: 4.0 + Math.random() * 0.6,
-      playStore: 3.8 + Math.random() * 0.6,
-    })
+      appStore: 4.2,
+      playStore: 4.0,
+    });
   }
 
-  return data
+  return data;
 }
 
 // 生成模拟区域分布数据
 function generateMockRegionDistribution(): RegionData[] {
   return [
-    { name: "US", value: 210 },
+    { name: "US", value: 200 },
     { name: "UK", value: 150 },
     { name: "JP", value: 80 },
-    { name: "DE", value: 45 },
-    { name: "FR", value: 38 },
-  ]
+    { name: "DE", value: 50 },
+    { name: "FR", value: 40 },
+  ];
 }
 
 // 初始化数据库
 export async function initDatabase(): Promise<void> {
-  // 示例应用数据
-  const sampleApps: App[] = [
-    {
-      id: "1",
-      name: "Fitness Tracker Pro",
-      icon: "/placeholder.svg?height=60&width=60",
-      appStoreId: "123456789",
-      playStoreId: "com.example.fitnesstracker",
-      appStoreRegions: ["US", "UK", "JP"],
-      playStoreRegions: ["US", "UK", "DE", "FR"],
-      appStoreFrequency: "daily",
-      playStoreFrequency: "daily",
-      rating: 4.5,
-      reviewCount: 523,
-      lastUpdated: new Date().toISOString(),
-    },
-    {
-      id: "2",
-      name: "Weather Now",
-      icon: "/placeholder.svg?height=60&width=60",
-      appStoreId: "987654321",
-      playStoreId: null,
-      appStoreRegions: ["US", "CA"],
-      playStoreRegions: [],
-      appStoreFrequency: "daily",
-      playStoreFrequency: null,
-      rating: 4.2,
-      reviewCount: 312,
-      lastUpdated: new Date().toISOString(),
-    },
-    {
-      id: "3",
-      name: "Task Manager",
-      icon: "/placeholder.svg?height=60&width=60",
-      appStoreId: "456789123",
-      playStoreId: "com.example.taskmanager",
-      appStoreRegions: ["US", "UK"],
-      playStoreRegions: ["US", "UK", "DE", "FR"],
-      appStoreFrequency: "weekly",
-      playStoreFrequency: "daily",
-      rating: 3.8,
-      reviewCount: 289,
-      lastUpdated: new Date().toISOString(),
-    },
-    {
-      id: "4",
-      name: "Photo Editor",
-      icon: "/placeholder.svg?height=60&width=60",
-      appStoreId: null,
-      playStoreId: "com.example.photoeditor",
-      appStoreRegions: [],
-      playStoreRegions: ["US", "IN", "BR"],
-      appStoreFrequency: null,
-      playStoreFrequency: "daily",
-      rating: 4.1,
-      reviewCount: 124,
-      lastUpdated: new Date().toISOString(),
-    },
-  ]
-
-  // 示例评论数据
-  const sampleReviews: Review[] = [
-    {
-      id: "1",
-      appId: "1",
-      appName: "Fitness Tracker Pro",
-      userName: "JohnD",
-      rating: 5,
-      text: "This app has completely transformed my fitness routine. The tracking features are incredibly accurate and the interface is intuitive. Highly recommend!",
-      date: "2023-11-15T10:30:00Z",
-      store: "app-store",
-      region: "US",
-      version: "2.1.0",
-    },
-    {
-      id: "2",
-      appId: "2",
-      appName: "Weather Now",
-      userName: "SarahM",
-      rating: 4,
-      text: "Great app for checking the weather. The hourly forecasts are very accurate. Would be perfect if it had more detailed radar maps.",
-      date: "2023-11-15T09:45:00Z",
-      store: "app-store",
-      region: "UK",
-      version: "1.5.2",
-    },
-    {
-      id: "3",
-      appId: "3",
-      appName: "Task Manager",
-      userName: "MikeT",
-      rating: 2,
-      text: "The app keeps crashing when I try to create a new task list. Very frustrating experience. Hope they fix it soon.",
-      date: "2023-11-15T08:20:00Z",
-      store: "play-store",
-      region: "DE",
-      version: "3.0.1",
-    },
-    {
-      id: "4",
-      appId: "4",
-      appName: "Photo Editor",
-      userName: "AnnaK",
-      rating: 5,
-      text: "Amazing photo editing tools! The filters are high quality and the UI is so easy to use. Best photo editor I've tried.",
-      date: "2023-11-15T07:15:00Z",
-      store: "play-store",
-      region: "US",
-      version: "2.2.0",
-    },
-    {
-      id: "5",
-      appId: "1",
-      appName: "Fitness Tracker Pro",
-      userName: "DavidL",
-      rating: 3,
-      text: "Good app overall, but the sleep tracking feature isn't very accurate. It often shows I'm sleeping when I'm just lying still reading.",
-      date: "2023-11-14T22:10:00Z",
-      store: "app-store",
-      region: "JP",
-      version: "2.1.0",
-    },
-  ]
-
-  // 检查是否已有数据
-  const existingApps = await getApps()
-
-  if (existingApps.length === 0) {
-    console.log("Initializing database with sample data...")
-
-    // 保存示例应用
-    for (const app of sampleApps) {
-      await createApp(app)
-    }
-
-    // 保存示例评论
-    for (const review of sampleReviews) {
-      if (!memoryReviews[review.appId]) {
-        memoryReviews[review.appId] = []
-      }
-
-      if (canUseRedis && redis) {
-        await redis.rpush(`reviews:${review.appId}`, JSON.stringify(review))
+  if (canUseRedis && redis) {
+    try {
+      // 检查是否已经有数据
+      const existingApps = await redis.hgetall("apps");
+      if (!existingApps || Object.keys(existingApps).length === 0) {
+        console.log('Initializing database with sample data...');
+        // 添加示例应用
+        const sampleApp: App = {
+          id: "sample-app-1",
+          name: "Sample App",
+          appStoreId: "123456789",
+          playStoreId: "com.example.app",
+          icon: "https://example.com/icon.png",
+          rating: 4.5,
+          reviewCount: 0,
+          appStoreRegions: ["us", "gb", "jp"],
+          playStoreRegions: ["us", "gb", "jp"],
+          appStoreFrequency: "daily",
+          playStoreFrequency: "daily",
+          lastUpdated: new Date().toISOString()
+        };
+        
+        await createApp(sampleApp);
+        console.log('Sample data initialized successfully');
       } else {
-        memoryReviews[review.appId].push(review)
+        console.log('Database already contains data, skipping initialization');
       }
+    } catch (e) {
+      console.error('Failed to initialize database:', e);
     }
-
-    // 更新所有应用的统计信息
-    for (const app of sampleApps) {
-      await updateAppStats(app.id)
-    }
-
-    console.log("Database initialization complete")
+  } else {
+    console.log('Using in-memory storage');
   }
 }
 

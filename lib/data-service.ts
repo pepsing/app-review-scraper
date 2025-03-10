@@ -2,6 +2,17 @@
 import type { App, Review, RatingHistory, RegionData, Stats } from "./types"
 import * as db from "./db"
 
+export {
+  initDatabase,
+  createApp,
+  updateApp,
+  deleteApp,
+  getReviews,
+  addReviews,
+  getRatingHistory,
+  getRegionDistribution
+} from './db'
+
 // 数据访问函数
 export async function getApps(): Promise<App[]> {
   return db.getApps()
