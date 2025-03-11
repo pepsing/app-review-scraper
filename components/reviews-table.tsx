@@ -1,12 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp, Download, Search, Star } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Star } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 import type { Review } from "@/lib/types"
 
 interface ReviewsTableProps {
@@ -14,9 +14,10 @@ interface ReviewsTableProps {
 }
 
 export function ReviewsTable({ reviews }: ReviewsTableProps) {
-  const [searchTerm, setSearchTerm] = useState("")
   const [sortField, setSortField] = useState<string>("date")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10 // 每页显示的评论数量
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -27,41 +28,87 @@ export function ReviewsTable({ reviews }: ReviewsTableProps) {
     }
   }
 
-  const filteredReviews = reviews
-    .filter((review) => {
-      if (
-        searchTerm &&
-        !review.text.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !review.userName.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-        return false
-      return true
-    })
-    .sort((a, b) => {
-      if (sortField === "date") {
-        return sortDirection === "asc"
-          ? new Date(a.date).getTime() - new Date(b.date).getTime()
-          : new Date(b.date).getTime() - new Date(a.date).getTime()
-      } else if (sortField === "rating") {
-        return sortDirection === "asc" ? a.rating - b.rating : b.rating - a.rating
+  // 对评论进行排序
+  const sortedReviews = [...reviews].sort((a, b) => {
+    if (sortField === "date") {
+      return sortDirection === "asc"
+        ? new Date(a.date).getTime() - new Date(b.date).getTime()
+        : new Date(b.date).getTime() - new Date(a.date).getTime()
+    } else if (sortField === "rating") {
+      return sortDirection === "asc" ? a.rating - b.rating : b.rating - a.rating
+    }
+    return 0
+  })
+
+  // 计算总页数
+  const totalPages = Math.ceil(sortedReviews.length / pageSize)
+  
+  // 获取当前页的评论
+  const paginatedReviews = sortedReviews.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
+  // 处理页码变化
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  // 生成页码数组
+  const getPageNumbers = () => {
+    const pages = []
+    const maxPagesToShow = 5
+    
+    if (totalPages <= maxPagesToShow) {
+      // 如果总页数小于等于最大显示页数，显示所有页码
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i)
       }
-      return 0
-    })
+    } else {
+      // 总是显示第一页
+      pages.push(1)
+      
+      // 计算中间页码的起始和结束
+      let start = Math.max(2, currentPage - 1)
+      let end = Math.min(totalPages - 1, currentPage + 1)
+      
+      // 如果当前页靠近开始，调整结束页
+      if (currentPage <= 3) {
+        end = Math.min(totalPages - 1, maxPagesToShow - 1)
+      }
+      
+      // 如果当前页靠近结束，调整起始页
+      if (currentPage >= totalPages - 2) {
+        start = Math.max(2, totalPages - maxPagesToShow + 2)
+      }
+      
+      // 添加省略号
+      if (start > 2) {
+        pages.push(-1) // 使用负数表示省略号
+      }
+      
+      // 添加中间页码
+      for (let i = start; i <= end; i++) {
+        pages.push(i)
+      }
+      
+      // 添加省略号
+      if (end < totalPages - 1) {
+        pages.push(-2) // 使用另一个负数表示省略号
+      }
+      
+      // 总是显示最后一页
+      pages.push(totalPages)
+    }
+    
+    return pages
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search reviews..."
-            className="pl-8"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
+      <div className="flex items-center justify-end mb-4">
         <Button variant="outline" size="sm" asChild>
-          <a href={`/api/export-reviews?reviews=${encodeURIComponent(JSON.stringify(filteredReviews))}`} download>
+          <a href={`/api/export-reviews?reviews=${encodeURIComponent(JSON.stringify(sortedReviews))}`} download>
             <Download className="mr-2 h-4 w-4" />
             Export
           </a>
@@ -101,14 +148,14 @@ export function ReviewsTable({ reviews }: ReviewsTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredReviews.length === 0 ? (
+            {paginatedReviews.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-4">
                   No reviews found
                 </TableCell>
               </TableRow>
             ) : (
-              filteredReviews.map((review) => (
+              paginatedReviews.map((review) => (
                 <TableRow key={review.id}>
                   <TableCell className="whitespace-nowrap">{new Date(review.date).toLocaleDateString()}</TableCell>
                   <TableCell>{review.userName}</TableCell>
@@ -136,6 +183,55 @@ export function ReviewsTable({ reviews }: ReviewsTableProps) {
           </TableBody>
         </Table>
       </div>
+      
+      {totalPages > 1 && (
+        <Pagination className="mt-4">
+          <PaginationContent>
+            {currentPage > 1 && (
+              <PaginationItem>
+                <PaginationPrevious 
+                  href="#" 
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handlePageChange(currentPage - 1)
+                  }} 
+                />
+              </PaginationItem>
+            )}
+            
+            {getPageNumbers().map((page, index) => (
+              <PaginationItem key={index}>
+                {page < 0 ? (
+                  <PaginationEllipsis />
+                ) : (
+                  <PaginationLink 
+                    href="#" 
+                    isActive={page === currentPage}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      handlePageChange(page)
+                    }}
+                  >
+                    {page}
+                  </PaginationLink>
+                )}
+              </PaginationItem>
+            ))}
+            
+            {currentPage < totalPages && (
+              <PaginationItem>
+                <PaginationNext 
+                  href="#" 
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handlePageChange(currentPage + 1)
+                  }} 
+                />
+              </PaginationItem>
+            )}
+          </PaginationContent>
+        </Pagination>
+      )}
     </div>
   )
 }

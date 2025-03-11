@@ -3,7 +3,8 @@ import { getAppById } from "@/lib/data-service"
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   try {
-    const app = await getAppById(params.id)
+    const { id } = await params
+    const app = await getAppById(id)
 
     if (!app) {
       return NextResponse.json({ error: "App not found" }, { status: 404 })
@@ -14,4 +15,4 @@ export async function GET(request: Request, { params }: { params: { id: string }
     console.error("Error fetching app:", error)
     return NextResponse.json({ error: "Failed to fetch app" }, { status: 500 })
   }
-} 
+}

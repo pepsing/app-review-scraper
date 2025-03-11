@@ -3,7 +3,8 @@ import { getAppById, getAppReviews } from "@/lib/data-service"
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   try {
-    const appId = params.id
+    const { id } = await params
+    const appId = id
     const app = await getAppById(appId)
 
     if (!app) {

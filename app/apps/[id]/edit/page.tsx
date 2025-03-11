@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -22,6 +23,9 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [app, setApp] = useState<App | null>(null)
+  
+  // 使用React.use()解包params，然后再解构id
+  const { id } = React.use(params)
 
   const [appName, setAppName] = useState("")
   const [appIcon, setAppIcon] = useState("")
@@ -38,7 +42,7 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     async function loadApp() {
       try {
-        const response = await fetch(`/api/apps/${params.id}`)
+        const response = await fetch(`/api/apps/${id}`)
         if (!response.ok) throw new Error('Failed to fetch app')
         const app = await response.json()
         setApp(app)
@@ -67,7 +71,7 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
     }
 
     loadApp()
-  }, [params.id])
+  }, [id])
 
   const addRegion = (store: "appStore" | "playStore") => {
     if (!newRegion) return
@@ -173,7 +177,7 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
     return (
       <div className="container mx-auto py-6">
         <div className="flex items-center mb-6">
-          <Link href={`/apps/${params.id}`} className="mr-4">
+          <Link href={`/apps/${id}`} className="mr-4">
             <Button variant="outline" size="icon">
               <ArrowLeft className="h-4 w-4" />
             </Button>
@@ -203,7 +207,7 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
   return (
     <div className="container mx-auto py-6">
       <div className="flex items-center mb-6">
-        <Link href={`/apps/${params.id}`} className="mr-4">
+        <Link href={`/apps/${id}`} className="mr-4">
           <Button variant="outline" size="icon">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -404,7 +408,7 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
             </Tabs>
           </CardContent>
           <CardFooter className="flex justify-between">
-            <Link href={`/apps/${params.id}`}>
+            <Link href={`/apps/${id}`}>
               <Button variant="outline" type="button">
                 Cancel
               </Button>
@@ -417,4 +421,4 @@ export default function EditAppPage({ params }: { params: { id: string } }) {
       </form>
     </div>
   )
-} 
+}

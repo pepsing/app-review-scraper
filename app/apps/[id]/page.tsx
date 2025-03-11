@@ -11,6 +11,7 @@ import { RegionDistribution } from "@/components/region-distribution"
 import { getAppById, getAppReviews, getAppRatingHistory, getAppRegionDistribution } from "@/lib/data-service"
 import { DeleteAppButton } from "@/components/delete-app-button"
 import { ScrapeNowButton } from "@/components/scrape-now-button"
+import { ClearReviewsButton } from "@/components/clear-reviews-button"
 
 type Props = {
   params: Promise<{ id: string }>
@@ -163,9 +164,12 @@ export default async function AppDetailsPage({ params }: Props) {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Reviews</CardTitle>
-          <CardDescription>All reviews for {app.name}</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <div>
+            <CardTitle>Reviews</CardTitle>
+            <CardDescription>All reviews for {app.name}</CardDescription>
+          </div>
+          <ClearReviewsButton appId={app.id} />
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="all">

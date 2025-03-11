@@ -112,34 +112,76 @@ export async function deleteApp(id: string): Promise<void> {
   }
 }
 
+// 清空应用评论
+export async function clearAppReviews(appId: string): Promise<void> {
+  if (canUseRedis && redis) {
+    await redis.del(`reviews:${appId}`)
+  } else {
+    memoryReviews[appId] = []
+  }
+
+  // 更新应用统计信息
+  await updateAppStats(appId)
+}
+
 // 评论相关操作
 export async function getReviews(appId: string): Promise<Review[]> {
   if (canUseRedis && redis) {
     try {
-      const reviewData = (await redis.lrange(`reviews:${appId}`, 0, -1)) as any[]
-      return reviewData.map((data) => {
-        try {
-          // 检查是否已经是对象
-          if (typeof data === 'object' && data !== null) {
-            return data;
-          }
-          // 如果是字符串，尝试解析
-          if (typeof data === 'string') {
-            return JSON.parse(data);
-          }
-          console.error('Invalid review data format:', data);
-          return null;
-        } catch (e) {
-          console.error('Failed to parse review data:', data, e);
-          return null;
+      const BATCH_SIZE = 500; // 每批读取100条评论
+      let allReviews: Review[] = [];
+      let start = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const reviewData = (await redis.lrange(`reviews:${appId}`, start, start + BATCH_SIZE - 1)) as any[];
+        console.log(`[DB] Retrieved batch of ${reviewData.length} reviews for app ${appId} (start: ${start})`);
+
+        if (reviewData.length === 0) {
+          hasMore = false;
+          break;
         }
-      }).filter(Boolean);
+
+        const batchReviews = reviewData.map((data) => {
+          try {
+            let review;
+            // 检查是否已经是对象
+            if (typeof data === 'object' && data !== null) {
+              review = data;
+            }
+            // 如果是字符串，尝试解析
+            else if (typeof data === 'string') {
+              review = JSON.parse(data);
+            } else {
+              console.error('[DB] Invalid review data format:', data);
+              return null;
+            }
+            return review;
+          } catch (e) {
+            console.error('[DB] Failed to parse review data:', data, e);
+            return null;
+          }
+        }).filter(Boolean);
+
+        allReviews = [...allReviews, ...batchReviews];
+        start += BATCH_SIZE;
+
+        // 如果这批数据小于BATCH_SIZE，说明已经读取完所有数据
+        if (reviewData.length < BATCH_SIZE) {
+          hasMore = false;
+        }
+      }
+
+      console.log(`[DB] Total ${allReviews.length} reviews retrieved for app ${appId}`);
+      return allReviews;
     } catch (e) {
       console.error('Failed to get reviews from Redis:', e);
       return [];
     }
   } else {
-    return memoryReviews[appId] || []
+    // 直接返回内存中的评论
+    const reviews = memoryReviews[appId] || [];
+    return reviews;
   }
 }
 
@@ -147,13 +189,115 @@ export async function addReviews(appId: string, reviews: Review[]): Promise<void
   if (reviews.length === 0) return
 
   if (canUseRedis && redis) {
-    const reviewStrings = reviews.map((review) => JSON.stringify(review))
-    await redis.rpush(`reviews:${appId}`, ...reviewStrings)
+    // 获取现有评论用于去重
+    const existingReviewsData = (await redis.lrange(`reviews:${appId}`, 0, -1)) as any[]
+    const existingReviews = existingReviewsData.map(data => {
+      if (typeof data === 'object' && data !== null) {
+        return data
+      } else if (typeof data === 'string') {
+        return JSON.parse(data)
+      }
+      return null
+    }).filter(Boolean)
+
+    // 增强去重逻辑：不仅基于ID去重，还基于内容、用户名和日期的组合进行去重
+    const existingIds = new Set(existingReviews.map((r) => r.id))
+    
+    // 创建内容指纹集合，用于内容级别的去重
+    const existingContentFingerprints = new Set()
+    existingReviews.forEach((review) => {
+      // 创建内容指纹：用户名+评分+评论文本+版本（如果有）
+      const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+      existingContentFingerprints.add(contentFingerprint)
+    })
+
+    // 过滤掉ID重复或内容重复的评论
+    const newReviews = reviews.filter((review) => {
+      // 检查ID是否重复
+      if (existingIds.has(review.id)) return false
+      
+      // 检查内容是否重复
+      const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+      if (existingContentFingerprints.has(contentFingerprint)) {
+        console.log(`[DB去重] 发现重复评论内容: ${contentFingerprint} 来自 ${review.store}`)
+        return false
+      }
+      
+      // 不重复，添加到指纹集合中
+      existingContentFingerprints.add(contentFingerprint)
+      return true
+    })
+
+    console.log(`[DB去重] 过滤前评论数: ${reviews.length}, 过滤后: ${newReviews.length}`)
+    
+    // 分批添加新评论，每批次控制在 800KB 以内（留出一些余量）
+    if (newReviews.length > 0) {
+      const BATCH_SIZE_LIMIT = 800 * 1024; // 800KB
+      let currentBatch: string[] = [];
+      let currentBatchSize = 0;
+
+      for (const review of newReviews) {
+        const reviewString = JSON.stringify(review);
+        const reviewSize = Buffer.byteLength(reviewString, 'utf8');
+
+        // 如果当前批次加上新评论会超出限制，先保存当前批次
+        if (currentBatchSize + reviewSize > BATCH_SIZE_LIMIT) {
+          if (currentBatch.length > 0) {
+            await redis.rpush(`reviews:${appId}`, ...currentBatch);
+            console.log(`[DB] 已保存一批评论，数量: ${currentBatch.length}`);
+          }
+          currentBatch = [reviewString];
+          currentBatchSize = reviewSize;
+        } else {
+          currentBatch.push(reviewString);
+          currentBatchSize += reviewSize;
+        }
+      }
+
+      // 保存最后一批
+      if (currentBatch.length > 0) {
+        await redis.rpush(`reviews:${appId}`, ...currentBatch);
+        console.log(`[DB] 已保存最后一批评论，数量: ${currentBatch.length}`);
+      }
+    }
   } else {
+    // 内存存储的去重逻辑
     if (!memoryReviews[appId]) {
       memoryReviews[appId] = []
     }
-    memoryReviews[appId] = [...memoryReviews[appId], ...reviews]
+    
+    // 增强去重逻辑：不仅基于ID去重，还基于内容、用户名和日期的组合进行去重
+    const existingIds = new Set(memoryReviews[appId].map((r) => r.id))
+    
+    // 创建内容指纹集合，用于内容级别的去重
+    const existingContentFingerprints = new Set()
+    memoryReviews[appId].forEach((review) => {
+      // 创建内容指纹：用户名+评分+评论文本+版本（如果有）
+      const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+      existingContentFingerprints.add(contentFingerprint)
+    })
+
+    // 过滤掉ID重复或内容重复的评论
+    const newReviews = reviews.filter((review) => {
+      // 检查ID是否重复
+      if (existingIds.has(review.id)) return false
+      
+      // 检查内容是否重复
+      const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+      if (existingContentFingerprints.has(contentFingerprint)) {
+        console.log(`[内存去重] 发现重复评论内容: ${contentFingerprint} 来自 ${review.store}`)
+        return false
+      }
+      
+      // 不重复，添加到指纹集合中
+      existingContentFingerprints.add(contentFingerprint)
+      return true
+    })
+
+    console.log(`[内存去重] 过滤前评论数: ${reviews.length}, 过滤后: ${newReviews.length}`)
+    
+    // 添加新评论
+    memoryReviews[appId] = [...memoryReviews[appId], ...newReviews]
   }
 
   // 更新应用统计信息

@@ -35,20 +35,27 @@ export async function deleteApp(id: string) {
   revalidatePath("/")
 }
 
+// 清空应用评论
+export async function clearAppReviews(appId: string) {
+  await db.clearAppReviews(appId)
+  revalidatePath(`/apps/${appId}`)
+  return true
+}
+
 // 抓取应用评论
-export async function scrapeAppReviews(appId: string) {
+export async function scrapeAppReviews(appId: string, fullScrape: boolean = false) {
   const app = await db.getAppById(appId)
   if (!app) return
 
   const reviews: Review[] = []
 
   if (app.appStoreId) {
-    const appStoreReviews = await scrapeAppStoreReviews(app.appStoreId, app.appStoreRegions)
+    const appStoreReviews = await scrapeAppStoreReviews(app.appStoreId, app.appStoreRegions, fullScrape)
     reviews.push(...appStoreReviews)
   }
 
   if (app.playStoreId) {
-    const playStoreReviews = await scrapePlayStoreReviews(app.playStoreId, app.playStoreRegions)
+    const playStoreReviews = await scrapePlayStoreReviews(app.playStoreId, app.playStoreRegions, fullScrape)
     reviews.push(...playStoreReviews)
   }
 
@@ -57,6 +64,6 @@ export async function scrapeAppReviews(appId: string) {
   }
 
   revalidatePath(`/apps/${appId}`)
-  return reviews
+  return { reviewsCount: reviews.length }
 }
 

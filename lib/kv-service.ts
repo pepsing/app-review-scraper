@@ -35,9 +35,35 @@ export async function saveReviews(appId: string, reviews: Review[]): Promise<voi
   const existingReviewsStr = (await kv.lrange(reviewsKey, 0, -1)) as string[]
   const existingReviews = existingReviewsStr.map((str) => JSON.parse(str)) as Review[]
 
-  // 合并评论，避免重复
+  // 增强去重逻辑：不仅基于ID去重，还基于内容、用户名和日期的组合进行去重
   const existingIds = new Set(existingReviews.map((r) => r.id))
-  const newReviews = reviews.filter((r) => !existingIds.has(r.id))
+  
+  // 创建内容指纹集合，用于内容级别的去重
+  const existingContentFingerprints = new Set()
+  existingReviews.forEach((review) => {
+    // 创建内容指纹：用户名+评分+评论文本+版本（如果有）
+    const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+    existingContentFingerprints.add(contentFingerprint)
+  })
+
+  // 过滤掉ID重复或内容重复的评论
+  const newReviews = reviews.filter((review) => {
+    // 检查ID是否重复
+    if (existingIds.has(review.id)) return false
+    
+    // 检查内容是否重复
+    const contentFingerprint = `${review.userName}|${review.rating}|${review.text}|${review.version}`
+    if (existingContentFingerprints.has(contentFingerprint)) {
+      console.log(`[去重] 发现重复评论内容: ${contentFingerprint} 来自 ${review.store}`)
+      return false
+    }
+    
+    // 不重复，添加到指纹集合中
+    existingContentFingerprints.add(contentFingerprint)
+    return true
+  })
+
+  console.log(`[去重] 过滤前评论数: ${reviews.length}, 过滤后: ${newReviews.length}`)
 
   // 添加新评论
   if (newReviews.length > 0) {

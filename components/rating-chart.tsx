@@ -37,16 +37,16 @@ export function RatingChart({ data }: RatingChartProps) {
           <XAxis
             dataKey="date"
             tickLine={false}
-            axisLine={false}
+            axisLine={true}
             tickFormatter={(value) => {
               const date = new Date(value)
-              return `${date.toLocaleString("default", { month: "short" })}`
+              return `${date.toLocaleString("en", { month: "short" })}`
             }}
             tickMargin={10}
           />
           <YAxis
             tickLine={false}
-            axisLine={false}
+            axisLine={true}
             tickFormatter={(value) => `${value}`}
             domain={[3.5, 5]}
             tickMargin={10}
